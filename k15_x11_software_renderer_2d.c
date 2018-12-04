@@ -1,20 +1,18 @@
 #define _GNU_SOURCE 1
 
+#define K15_SOFTWARE_RENDERER_2D_IMPLEMENTATION
+#include "k15_software_renderer_2d.h"
+
 #include "stdio.h"
+#include "stddef.h"
 #include "time.h"
 #include "string.h"
 #include "unistd.h"
+#include "malloc.h"
 #include "X11/Xlib.h"
-#include "GL/gl.h"
-#include "GL/glx.h"
 
 #define K15_FALSE 0
 #define K15_TRUE 1
-
-#define	GLX_CONTEXT_MAJOR_VERSION_ARB           0x2091
-#define GLX_CONTEXT_MINOR_VERSION_ARB           0x2092
-#define GLX_CONTEXT_FLAGS_ARB                   0x2094
-#define GLX_CONTEXT_CORE_PROFILE_BIT_ARB        0x00000001
 
 typedef unsigned char bool8;
 typedef unsigned char byte;
@@ -26,8 +24,10 @@ Display* mainDisplay = 0;
 GC mainGC;
 Atom deleteMessage = 0;
 int nanoSecondsPerFrame = 16000000;
+ksr2_context renderer;
 
-typedef GLXContext (*glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
+int screenWidth = 800;
+int screenHeight = 600;
 
 void handleKeyPress(XEvent* p_Event)
 {
@@ -51,8 +51,8 @@ void handleMouseMotion(XEvent* p_Event)
 
 void handleWindowResize(XEvent* p_Event)
 {
-	int width = p_Event->xconfigure.width;
-	int height = p_Event->xconfigure.height;
+	screenWidth 	= p_Event->xconfigure.width;
+	screenHeight 	= p_Event->xconfigure.height;
 }
 
 bool8 filterEvent(XEvent* p_Event)
@@ -128,13 +128,26 @@ void setupWindow(Window* p_WindowOut, int p_Width, int p_Height)
 
 bool8 setup(Window* p_WindowOut)
 {
+	const size_t rendererMemorySize = ksr2_megabyte(5);
+
+	ksr2_context_parameters contextParameters;
+	contextParameters.backBufferWidth 	= screenWidth;
+	contextParameters.backBufferHeight 	= screenHeight;
+	contextParameters.backBufferFormat	= K15_RENDERER_2D_PIXEL_FORMAT_RGB8;
+	contextParameters.pMemory			= malloc(rendererMemorySize);
+	contextParameters.memorySizeInBytes	= rendererMemorySize;
+	contextParameters.flags				= K15_RENDERER_2D_DOUBLE_BUFFERED_FLAG;
+
+	ksr2_contexthandle renderer;
+	ksr2_result result = ksr2_init_context(&contextParameters, &renderer);
+
 	XSetErrorHandler(errorHandler);
 	mainDisplay = XOpenDisplay(0);
 
 	if (mainDisplay)
 	{
 		deleteMessage = XInternAtom(mainDisplay, "WM_DELETE_WINDOW", False);
-		setupWindow(p_WindowOut, 800, 600);
+		setupWindow(p_WindowOut, screenWidth, screenHeight);
 		return K15_TRUE;
 	}
 
