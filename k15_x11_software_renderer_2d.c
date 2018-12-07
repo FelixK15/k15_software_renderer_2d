@@ -24,7 +24,7 @@ Display* mainDisplay = 0;
 GC mainGC;
 Atom deleteMessage = 0;
 int nanoSecondsPerFrame = 16000000;
-ksr2_context renderer;
+ksr2_contexthandle renderer;
 
 int screenWidth = 800;
 int screenHeight = 600;
@@ -53,6 +53,8 @@ void handleWindowResize(XEvent* p_Event)
 {
 	screenWidth 	= p_Event->xconfigure.width;
 	screenHeight 	= p_Event->xconfigure.height;
+
+	ksr2_resize_swap_chain(renderer, screenWidth, screenHeight, K15_RENDERER_2D_PIXEL_FORMAT_RGB8);
 }
 
 bool8 filterEvent(XEvent* p_Event)
@@ -138,7 +140,6 @@ bool8 setup(Window* p_WindowOut)
 	contextParameters.memorySizeInBytes	= rendererMemorySize;
 	contextParameters.flags				= K15_RENDERER_2D_DOUBLE_BUFFERED_FLAG;
 
-	ksr2_contexthandle renderer;
 	ksr2_result result = ksr2_init_context(&contextParameters, &renderer);
 
 	XSetErrorHandler(errorHandler);
@@ -166,6 +167,7 @@ void doFrame(Window* p_MainWindow, long p_DeltaTimeInNs)
 {
 	XClearWindow(mainDisplay, *p_MainWindow);
 	drawDeltaTime(p_MainWindow, p_DeltaTimeInNs);
+	ksr2_swap_buffers(renderer);
 	XFlush(mainDisplay);
 	XSync(mainDisplay, *p_MainWindow);
 }
