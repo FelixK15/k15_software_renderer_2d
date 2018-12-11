@@ -5,30 +5,11 @@
 # include "stddef.h"
 #endif
 
-typedef unsigned    int  	ksr2_u32;
-typedef signed      int  	ksr2_s32;
-typedef unsigned    char 	ksr2_u8;
-typedef signed      char 	ksr2_s8;
-typedef unsigned    short	ksr2_u16;
-typedef signed      short	ksr2_s16;
-typedef unsigned    char 	ksr2_b8;
-typedef unsigned    int		ksr2_b32;
-typedef unsigned    int    	ksr2_u32;
-typedef unsigned 	char	ksr2_byte;
-
 typedef size_t ksr2_contexthandle;
-
-#ifndef K15_RENDERER_2D_STATIC
-	#define ksr2_internal static
-#else
-	#define ksr2_internal extern
-#endif
 
 #define ksr2_kilobyte(x) 		(x * 1024)
 #define ksr2_megabyte(x) 		(ksr2_kilobyte(x) * 1024)
 #define ksr2_gigabyte(x) 		(ksr2_megabyte(x) * 1024)
-#define ksr2_nullptr			((void*)0)
-#define ksr2_use_argument(x)	((void)x)
 
 #ifdef K15_RENDERER_2D_NO_ASSERTS
 	#define ksr2_assert(x)
@@ -72,21 +53,13 @@ typedef void(*ksr2_debug_fnc)(ksr2_contexthandle, ksr2_debug_category, const cha
 
 typedef struct
 {
-	ksr2_u32 			stride;
-	ksr2_u32 			alignment;
-	ksr2_u8				channelCount;
-	ksr2_u8				bitsPerChannel[4u];
-	size_t 				memorySizeInBytes;
-} ksr2_image_memory_requirements;
-
-typedef struct
-{
     void*               pMemory;
     size_t              memorySizeInBytes;
-    ksr2_u32            backBufferWidth;
-    ksr2_u32            backBufferHeight;
-    ksr2_u32            backBufferCount;
-    ksr2_u32			flags;
+	
+    unsigned int        backBufferWidth;
+    unsigned int        backBufferHeight;
+    unsigned int        backBufferCount;
+    unsigned int		flags;
 
 	ksr2_pixel_format   backBufferFormat;
 	
@@ -94,6 +67,74 @@ typedef struct
 	ksr2_debug_category debugCategoryFilter;
 
 } ksr2_context_parameters;
+
+typedef struct 
+{
+	unsigned char r;
+	unsigned char g;
+	unsigned char b;
+	unsigned char a;
+} ksr2_rgba_color;
+
+ksr2_rgba_color ksr2_rgba_color_float(float r, float g, float b, float a);
+ksr2_rgba_color ksr2_rgba_color_uint8(unsigned char r, unsigned char g, unsigned char b, unsigned char a);
+ksr2_rgba_color ksr2_rgba_color_uint32(unsigned int rgba);
+
+ksr2_rgba_color ksr2_rgb_color_float(float r, float g, float b);
+ksr2_rgba_color ksr2_rgb_color_uint8(unsigned char r, unsigned char g, unsigned char b);
+ksr2_rgba_color ksr2_rgb_color_uint32(unsigned int rgba);
+
+ksr2_rgba_color ksr2_color_red();
+ksr2_rgba_color ksr2_color_green();
+ksr2_rgba_color ksr2_color_blue();
+ksr2_rgba_color ksr2_color_yellow();
+ksr2_rgba_color ksr2_color_magenta();
+ksr2_rgba_color ksr2_color_cyan();
+ksr2_rgba_color ksr2_color_white();
+ksr2_rgba_color ksr2_color_black();
+
+ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_contexthandle* pOutContextHandle);
+void ksr2_destroy_context(ksr2_contexthandle handle);
+void ksr2_swap_buffers(ksr2_contexthandle handle);
+unsigned char* ksr2_get_presenting_image_data(ksr2_contexthandle handle);
+
+ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, unsigned int width, unsigned int height, ksr2_pixel_format format);
+
+ksr2_result ksr2_draw_line(ksr2_contexthandle handle, int x1, int y1, int x2, int y2, unsigned int thickness, ksr2_rgba_color color);
+
+#ifdef K15_SOFTWARE_RENDERER_2D_IMPLEMENTATION
+
+#ifndef K15_RENDERER_2D_STATIC
+#	define ksr2_internal static
+#else
+#	define ksr2_internal extern
+#endif
+
+#ifndef ksr2_nullptr
+#	define ksr2_nullptr			((void*)0)
+#endif
+
+#define ksr2_use_argument(x)	((void)x)
+
+typedef unsigned    int  	ksr2_u32;
+typedef signed      int  	ksr2_s32;
+typedef unsigned    char 	ksr2_u8;
+typedef signed      char 	ksr2_s8;
+typedef unsigned    short	ksr2_u16;
+typedef signed      short	ksr2_s16;
+typedef unsigned    char 	ksr2_b8;
+typedef unsigned    int		ksr2_b32;
+typedef unsigned    int    	ksr2_u32;
+typedef unsigned 	char	ksr2_byte;
+
+typedef struct
+{
+	ksr2_u32 			stride;
+	ksr2_u32 			alignment;
+	ksr2_u8				channelCount;
+	ksr2_u8				bitsPerChannel[4u];
+	size_t 				memorySizeInBytes;
+} ksr2_image_memory_requirements;
 
 typedef struct
 {
@@ -129,14 +170,6 @@ typedef struct
 	ksr2_debug_category 	debugCategoryFilter;
 } ksr2_context;
 
-ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_contexthandle* pOutContextHandle);
-void ksr2_destroy_context(ksr2_contexthandle handle);
-void ksr2_swap_buffers(ksr2_contexthandle handle);
-unsigned char* ksr2_get_presenting_image_data(ksr2_contexthandle handle);
-
-ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format);
-
-#ifdef K15_SOFTWARE_RENDERER_2D_IMPLEMENTATION
 
 ksr2_internal ksr2_contexthandle 	ksr2_invalid_context_handle = 0u;
 ksr2_internal size_t 				ksr2_default_alignment		= 16u;
@@ -322,6 +355,115 @@ ksr2_internal ksr2_result ksr2_init_swap_chain(ksr2_swap_chain* pOutSwapChain, k
 
 // DECLARED FUNCTIONS
 
+float ksr2_clamp_float(float v, float min, float max)
+{
+	return v < min ? min : v > max ? max : v;
+}
+
+ksr2_rgba_color ksr2_rgba_color_float(float r, float g, float b, float a)
+{
+	ksr2_rgba_color color;
+	color.r = (ksr2_u8)(ksr2_clamp_float(r, 0.0f, 1.0f) * 255.0f);
+	color.g = (ksr2_u8)(ksr2_clamp_float(g, 0.0f, 1.0f) * 255.0f);
+	color.b = (ksr2_u8)(ksr2_clamp_float(b, 0.0f, 1.0f) * 255.0f);
+	color.a = (ksr2_u8)(ksr2_clamp_float(a, 0.0f, 1.0f) * 255.0f);
+
+	return color;
+}
+
+ksr2_rgba_color ksr2_rgba_color_uint8(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
+{
+	ksr2_rgba_color color;
+	color.r = r;
+	color.g = g;
+	color.b = b;
+	color.a = a;
+
+	return color;
+}
+
+ksr2_rgba_color ksr2_rgba_color_uint32(unsigned int rgba)
+{
+	ksr2_rgba_color color;
+	color.r = ((rgba >> 24) & 0xFF);
+	color.g = ((rgba >> 16) & 0xFF);
+	color.b = ((rgba >>  8) & 0xFF);
+	color.a = ((rgba >>  0) & 0xFF);
+}
+
+ksr2_rgba_color ksr2_rgb_color_float(float r, float g, float b)
+{
+	ksr2_rgba_color color;
+	color.r = (ksr2_u8)(ksr2_clamp_float(r, 0.0f, 1.0f) * 255.0f);
+	color.g = (ksr2_u8)(ksr2_clamp_float(g, 0.0f, 1.0f) * 255.0f);
+	color.b = (ksr2_u8)(ksr2_clamp_float(b, 0.0f, 1.0f) * 255.0f);
+	color.a = 255u;
+
+	return color;
+}
+
+ksr2_rgba_color ksr2_rgb_color_uint8(unsigned char r, unsigned char g, unsigned char b)
+{
+	ksr2_rgba_color color;
+	color.r = r;
+	color.g = g;
+	color.b = b;
+	color.a = 255u;
+	
+	return color;
+}
+
+ksr2_rgba_color ksr2_rgb_color_uint32(unsigned int rgb)
+{
+	ksr2_rgba_color color;
+	color.r = ((rgb >> 16) & 0xFF);
+	color.g = ((rgb >>  8) & 0xFF);
+	color.b = ((rgb >>  0) & 0xFF);
+	color.a = 255u;
+	
+	return color;
+}
+
+ksr2_rgba_color ksr2_color_red()
+{
+	return ksr2_rgb_color_uint8(0xFF, 0x00, 0x00);
+}
+
+ksr2_rgba_color ksr2_color_green()
+{
+	return ksr2_rgb_color_uint8(0x00, 0xFF, 0x00);
+}
+
+ksr2_rgba_color ksr2_color_blue()
+{
+	return ksr2_rgb_color_uint8(0x00, 0x00, 0xFF);
+}
+
+ksr2_rgba_color ksr2_color_yellow()
+{
+	return ksr2_rgb_color_uint8(0xFF, 0x00, 0xFF);
+}
+
+ksr2_rgba_color ksr2_color_magenta()
+{
+	return ksr2_rgb_color_uint8(0xFF, 0xFF, 0x00);
+}
+
+ksr2_rgba_color ksr2_color_cyna()
+{
+	return ksr2_rgb_color_uint8(0x00, 0xFF, 0xFF);
+}
+
+ksr2_rgba_color ksr2_color_white()
+{
+	return ksr2_rgb_color_uint8(0xFF, 0xFF, 0xFF);
+}
+
+ksr2_rgba_color ksr2_color_black()
+{
+	return ksr2_rgb_color_uint8(0x00, 0x00, 0x00);
+}
+
 ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_contexthandle* pOutContextHandle)
 {
 	ksr2_debug_fnc debugFnc = pParameters != ksr2_nullptr ? pParameters->debugFnc : ksr2_nullptr;
@@ -415,5 +557,23 @@ ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, ksr2_u32 width, ks
 
 	return K15_RENDERER_2D_RESULT_SUCCESS;
 }
+
+ksr2_result ksr2_draw_line(ksr2_contexthandle handle, int x1, int y1, int x2, int y2, unsigned int thickness, ksr2_rgba_color color)
+{
+	if (thickness == 0u)
+	{
+		return K15_RENDERER_2D_RESULT_SUCCESS;
+	}
+
+	if (x1 == x2 || y1 == y2)
+	{
+		return K15_RENDERER_2D_RESULT_SUCCESS;
+	}
+
+	ksr2_context* pContext = (ksr2_context*)handle;
+	
+	return K15_RENDERER_2D_RESULT_SUCCESS;
+}
+
 #endif // K15_SOFTWARE_RENDERER_2D_IMPLEMENTATION
 #endif // _K15_SOFTWARE_RENDERER_2D_H_

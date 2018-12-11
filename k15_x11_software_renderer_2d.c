@@ -167,11 +167,8 @@ void drawDeltaTime(Window* p_MainWindow, long p_DeltaTimeInNs)
 	XDrawString(mainDisplay, *p_MainWindow, mainGC, 20, 20, buffer, strlen(buffer));
 }
 
-void doFrame(Window* p_MainWindow, long p_DeltaTimeInNs)
+void swapBuffers(Window mainWindow)
 {
-	XClearWindow(mainDisplay, *p_MainWindow);
-	drawDeltaTime(p_MainWindow, p_DeltaTimeInNs);
-
 	unsigned char* pBackbuffer = ksr2_get_presenting_image_data(renderer);
 	
 	if (backbuffer != 0)
@@ -181,17 +178,29 @@ void doFrame(Window* p_MainWindow, long p_DeltaTimeInNs)
 
 	if (pBackbuffer)
 	{
-		backbuffer = XCreateBitmapFromData(mainDisplay, *p_MainWindow, pBackbuffer, screenWidth, screenHeight);
+		backbuffer = XCreateBitmapFromData(mainDisplay, mainWindow, pBackbuffer, screenWidth, screenHeight);
 	}
 
 	if (backbuffer != 0)
 	{
-		XCopyPlane(mainDisplay, backbuffer, *p_MainWindow, mainGC, 0, 0, screenWidth, screenHeight, 0, 0, 1);
+		XCopyPlane(mainDisplay, backbuffer, mainWindow, mainGC, 0, 0, screenWidth, screenHeight, 0, 0, 1);
 	}
 
 	ksr2_swap_buffers(renderer);
 	XFlush(mainDisplay);
-	XSync(mainDisplay, *p_MainWindow);
+	XSync(mainDisplay, mainWindow);
+}
+
+void doFrame(Window* p_MainWindow, long p_DeltaTimeInNs)
+{
+	XClearWindow(mainDisplay, *p_MainWindow);
+	//drawDeltaTime(p_MainWindow, p_DeltaTimeInNs);
+
+	ksr2_draw_line(renderer, 100, 100, 400, 400, 4, ksr2_color_red());
+	ksr2_draw_line(renderer, 400, 400, 100, 100, 4, ksr2_rgb_color_float(1.0f, 1.0f, 1.0f));
+	//ksr2_draw_aabb(renderer, 200, 200, 300, 300, 4, ksr2_color_yellow(), ksr2_color_blue());
+
+	swapBuffers(*p_MainWindow);
 }
 
 int main(int argc, char** argv)
