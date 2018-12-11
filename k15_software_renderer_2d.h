@@ -132,6 +132,7 @@ typedef struct
 ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_contexthandle* pOutContextHandle);
 void ksr2_destroy_context(ksr2_contexthandle handle);
 void ksr2_swap_buffers(ksr2_contexthandle handle);
+unsigned char* ksr2_get_presenting_image_data(ksr2_contexthandle handle);
 
 ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format);
 
@@ -198,7 +199,7 @@ ksr2_internal ksr2_result ksr2_allocator_from_linear_allocator_back(void** pOutP
 		return K15_RENDERER_2D_RESULT_OUT_OF_MEMORY;
 	}
 
-	pOutPointer = (void*)(pAllocator->pEndAddress - pAllocator->memorySizeInBytesEnd);
+	pOutPointer = (void*)(pAllocator->pEndAddress - pAllocator->memorySizeInBytesEnd - memorySizeInBytes);
 	pAllocator->memorySizeInBytesEnd += memorySizeInBytes;
 
 	return K15_RENDERER_2D_RESULT_SUCCESS;	
@@ -382,6 +383,12 @@ void ksr2_swap_buffers(ksr2_contexthandle handle)
 	}
 	
 	pContext->swapChain.pCurrentImage = pContext->swapChain.pImages[pContext->swapChain.imageIndex];
+}
+
+unsigned char* ksr2_get_presenting_image_data(ksr2_contexthandle handle)
+{
+	ksr2_context* pContext = (ksr2_context*)handle;
+	return (unsigned char*)pContext->swapChain.pCurrentImage;
 }
 
 ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format)

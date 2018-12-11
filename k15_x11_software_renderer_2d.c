@@ -21,7 +21,9 @@ typedef unsigned short uint16;
 typedef unsigned char uint8;
 
 Display* mainDisplay = 0;
+Drawable mainDrawable = 0;
 GC mainGC;
+Pixmap backbuffer;
 Atom deleteMessage = 0;
 int nanoSecondsPerFrame = 16000000;
 ksr2_contexthandle renderer;
@@ -121,6 +123,8 @@ void setupWindow(Window* p_WindowOut, int p_Width, int p_Height)
 	*p_WindowOut = window;
 
 	mainGC = XCreateGC(mainDisplay, window, 0, 0);
+	mainDrawable = window;
+
 	XSetForeground(mainDisplay, mainGC, (~0));
 	XStoreName(mainDisplay, window, "Test Window!");
 	XSelectInput(mainDisplay, window, eventMask);
@@ -167,6 +171,24 @@ void doFrame(Window* p_MainWindow, long p_DeltaTimeInNs)
 {
 	XClearWindow(mainDisplay, *p_MainWindow);
 	drawDeltaTime(p_MainWindow, p_DeltaTimeInNs);
+
+	unsigned char* pBackbuffer = ksr2_get_presenting_image_data(renderer);
+	
+	if (backbuffer != 0)
+	{
+		XFreePixmap(mainDisplay, backbuffer);
+	}
+
+	if (pBackbuffer)
+	{
+		backbuffer = XCreateBitmapFromData(mainDisplay, *p_MainWindow, pBackbuffer, screenWidth, screenHeight);
+	}
+
+	if (backbuffer != 0)
+	{
+		XCopyPlane(mainDisplay, backbuffer, *p_MainWindow, mainGC, 0, 0, screenWidth, screenHeight, 0, 0, 1);
+	}
+
 	ksr2_swap_buffers(renderer);
 	XFlush(mainDisplay);
 	XSync(mainDisplay, *p_MainWindow);
