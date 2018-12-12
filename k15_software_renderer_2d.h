@@ -98,8 +98,8 @@ void ksr2_destroy_context(ksr2_contexthandle handle);
 void ksr2_swap_buffers(ksr2_contexthandle handle);
 unsigned char* ksr2_get_presenting_image_data(ksr2_contexthandle handle);
 
+void ksr2_blit(ksr2_contexthandle handle);
 ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, unsigned int width, unsigned int height, ksr2_pixel_format format);
-
 ksr2_result ksr2_draw_line(ksr2_contexthandle handle, int x1, int y1, int x2, int y2, unsigned int thickness, ksr2_rgba_color color);
 
 #ifdef K15_SOFTWARE_RENDERER_2D_IMPLEMENTATION
@@ -108,6 +108,10 @@ ksr2_result ksr2_draw_line(ksr2_contexthandle handle, int x1, int y1, int x2, in
 #	define ksr2_internal static
 #else
 #	define ksr2_internal extern
+#endif
+
+#ifndef K15_RENDERER_2D_EXTENSIVE_ARGUMENT_CHECK
+#	define K15_RENDERER_2D_EXTENSIVE_ARGUMENT_CHECK 1
 #endif
 
 #ifndef ksr2_nullptr
@@ -126,6 +130,8 @@ typedef unsigned    char 	ksr2_b8;
 typedef unsigned    int		ksr2_b32;
 typedef unsigned    int    	ksr2_u32;
 typedef unsigned 	char	ksr2_byte;
+
+
 
 typedef struct
 {
@@ -158,19 +164,47 @@ typedef struct
 	ksr2_image_memory_requirements 		memoryRequirements;
 } ksr2_swap_chain;
 
+typedef enum
+{
+	K15_RENDERER_2D_DRAW_COMMAND_LINE
+} ksr2_draw_command_type;
+
 typedef struct
 {
-    void*   				pMemory;
-    size_t 					memorySizeInBytes;
+	void* 					pNext;
+	char 					fourcc[4];
+	size_t 					sizeInBytes;
+	ksr2_draw_command_type 	type;
+} ksr2_draw_command_header;
 
-	ksr2_linear_allocator 	allocator;
-	ksr2_swap_chain			swapChain;
+typedef struct
+{
+	ksr2_draw_command_header 	header;
+	ksr2_s32 					x1;
+	ksr2_s32 					y1;
+	ksr2_s32 					x2; 
+	ksr2_s32 					y2;
+	ksr2_u32 					thickness;
+	ksr2_rgba_color 			color;
+} ksr2_line_draw_command;
 
-	ksr2_debug_fnc			debugFnc;
-	ksr2_debug_category 	debugCategoryFilter;
+typedef struct
+{
+	char 						fourcc[4];
+
+	ksr2_draw_command_header* 	pFirstDrawCommand;
+    void*   					pMemory;
+    size_t 						memorySizeInBytes;
+
+	ksr2_linear_allocator 		allocator;
+	ksr2_swap_chain				swapChain;
+
+	ksr2_debug_fnc				debugFnc;
+	ksr2_debug_category 		debugCategoryFilter;
 } ksr2_context;
 
-
+ksr2_internal ksr2_b32 				ksr2_true 					= 1u;
+ksr2_internal ksr2_b32 				ksr2_false					= 0u;
 ksr2_internal ksr2_contexthandle 	ksr2_invalid_context_handle = 0u;
 ksr2_internal size_t 				ksr2_default_alignment		= 16u;
 
@@ -179,6 +213,36 @@ ksr2_internal void ksr2_debug_fnc_stub(ksr2_contexthandle contextHandle, ksr2_de
 	ksr2_use_argument(contextHandle);
 	ksr2_use_argument(category);
 	ksr2_use_argument(pMessage);
+}
+
+ksr2_internal ksr2_b32 ksr2_check_fourcc(char* pFourCC1, const char* pFourCC2)
+{
+	return pFourCC1[0] == pFourCC2[0] && 
+	pFourCC1[1] == pFourCC2[1] && 
+	pFourCC1[2] == pFourCC2[2] && 
+	pFourCC1[3] == pFourCC2[3];
+}
+
+ksr2_internal void ksr2_init_fourcc(char* pFourCCDst, const char* pFourCCSrc)
+{
+	pFourCCDst[0] = pFourCCSrc[0];
+	pFourCCDst[1] = pFourCCSrc[1];
+	pFourCCDst[2] = pFourCCSrc[2];
+	pFourCCDst[3] = pFourCCSrc[3];
+}
+
+ksr2_internal ksr2_context* ksr2_contexthandle_to_context(ksr2_contexthandle handle)
+{
+	ksr2_context* pContext = (ksr2_context*)(handle);
+
+#if K15_RENDERER_2D_EXTENSIVE_ARGUMENT_CHECK
+	if (ksr2_check_fourcc(pContext->fourcc, "KR2C") == ksr2_false)
+	{
+		return ksr2_nullptr;
+	}
+#endif
+
+	return pContext;
 }
 
 ksr2_internal void ksr2_init_linear_allocator(ksr2_linear_allocator* pOutAllocator, void* pBaseAddress, size_t memorySizeInBytes)
@@ -223,8 +287,10 @@ ksr2_internal ksr2_result ksr2_allocate_from_linear_allocator_front(void** pOutP
 	return K15_RENDERER_2D_RESULT_SUCCESS;
 }
 
-ksr2_internal ksr2_result ksr2_allocator_from_linear_allocator_back(void** pOutPointer, ksr2_linear_allocator* pAllocator, size_t memorySizeInBytes)
+ksr2_internal ksr2_result ksr2_allocate_from_linear_allocator_back(void** pOutPointer, ksr2_linear_allocator* pAllocator, size_t memorySizeInBytes, size_t alignment)
 {
+	ksr2_use_argument(alignment);
+
 	const size_t allocatorCapacityInBytes = ksr2_get_linear_allocator_capacity(pAllocator);
 
 	if (allocatorCapacityInBytes < memorySizeInBytes)
@@ -232,10 +298,14 @@ ksr2_internal ksr2_result ksr2_allocator_from_linear_allocator_back(void** pOutP
 		return K15_RENDERER_2D_RESULT_OUT_OF_MEMORY;
 	}
 
-	pOutPointer = (void*)(pAllocator->pEndAddress - pAllocator->memorySizeInBytesEnd - memorySizeInBytes);
+	*pOutPointer = (void*)(pAllocator->pEndAddress - pAllocator->memorySizeInBytesEnd - memorySizeInBytes);
 	pAllocator->memorySizeInBytesEnd += memorySizeInBytes;
 
 	return K15_RENDERER_2D_RESULT_SUCCESS;	
+}
+ksr2_internal void ksr2_reset_allocator_back(ksr2_linear_allocator* pAllocator)
+{
+	pAllocator->memorySizeInBytesEnd = 0u;
 }
 
 ksr2_internal size_t ksr2_get_pixel_size_in_bytes(ksr2_pixel_format format)
@@ -351,6 +421,59 @@ ksr2_internal ksr2_result ksr2_init_swap_chain(ksr2_swap_chain* pOutSwapChain, k
 	*pOutSwapChain = swapChain;
 
 	return K15_RENDERER_2D_RESULT_SUCCESS;
+}
+
+ksr2_internal void ksr2_push_draw_command(ksr2_context* pContext, void* pDrawCommand)
+{
+	ksr2_draw_command_header* pHeader = (ksr2_draw_command_header*)pDrawCommand;
+
+#if K15_RENDERER_2D_EXTENSIVE_ARGUMENT_CHECK
+	if (ksr2_check_fourcc(pHeader->fourcc, "KR2D") == ksr2_false)
+	{
+		return;
+	}
+#endif
+
+	pHeader->pNext = pContext->pFirstDrawCommand;
+	pContext->pFirstDrawCommand = pHeader;
+
+	return;
+}
+
+ksr2_internal ksr2_result ksr2_allocate_draw_command(void** pOutDrawCommand, ksr2_context* pContext, size_t sizeInBytes, ksr2_draw_command_type type)
+{
+	const size_t drawCommandSizeInBytes = sizeof(ksr2_draw_command_header) + sizeInBytes;
+	
+	ksr2_result result = ksr2_allocate_from_linear_allocator_back(pOutDrawCommand, &pContext->allocator, drawCommandSizeInBytes, ksr2_default_alignment);
+
+	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
+	{
+		return result;
+	}
+
+	ksr2_draw_command_header* pHeader = (ksr2_draw_command_header*)(*pOutDrawCommand);
+	
+	ksr2_init_fourcc(pHeader->fourcc, "KR2D");
+	pHeader->type 			= type;
+	pHeader->sizeInBytes 	= sizeInBytes;
+	pHeader->pNext 			= ksr2_nullptr;
+
+	return K15_RENDERER_2D_RESULT_SUCCESS;
+}
+
+ksr2_internal ksr2_result ksr2_issue_line_draw_command(ksr2_draw_command_header* pHeader)
+{
+#if K15_RENDERER_2D_EXTENSIVE_ARGUMENT_CHECK
+	if (ksr2_check_fourcc(pHeader->fourcc, "KR2D") == ksr2_false)
+	{
+		return K15_RENDERER_2D_RESULT_INVALID_ARGUMENT;
+	}
+#endif
+
+	ksr2_line_draw_command* pDrawCommand = (ksr2_line_draw_command*)pHeader;
+
+	return K15_RENDERER_2D_RESULT_SUCCESS;
+
 }
 
 // DECLARED FUNCTIONS
@@ -499,7 +622,11 @@ ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_c
 		return result;
 	}
 
-	pContext->allocator = allocator;
+	ksr2_init_fourcc(pContext->fourcc, "KR2C");
+
+	pContext->allocator 		= allocator;
+	pContext->pFirstDrawCommand = ksr2_nullptr;
+
 	ksr2_contexthandle handle = (ksr2_contexthandle)(pContext);
 	*pOutContextHandle = handle;
 
@@ -513,7 +640,7 @@ void ksr2_destroy_context(ksr2_contexthandle handle)
 
 void ksr2_swap_buffers(ksr2_contexthandle handle)
 {
-	ksr2_context* pContext = (ksr2_context*)handle;
+	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
 
 	if (pContext->swapChain.imageIndex + 1u == pContext->swapChain.imageCount)
 	{
@@ -529,17 +656,41 @@ void ksr2_swap_buffers(ksr2_contexthandle handle)
 
 unsigned char* ksr2_get_presenting_image_data(ksr2_contexthandle handle)
 {
-	ksr2_context* pContext = (ksr2_context*)handle;
+	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
 	return (unsigned char*)pContext->swapChain.pCurrentImage;
+}
+
+void ksr2_blit(ksr2_contexthandle handle)
+{
+	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
+
+	ksr2_draw_command_header* pDrawCommand = pContext->pFirstDrawCommand;
+
+	while(pDrawCommand != ksr2_nullptr)
+	{
+		switch(pDrawCommand->type)
+		{
+			case K15_RENDERER_2D_DRAW_COMMAND_LINE:
+				ksr2_issue_line_draw_command(pDrawCommand);
+			break;
+
+			default:
+				ksr2_assert(ksr2_false);
+			break;
+		}	
+
+		pDrawCommand = (ksr2_draw_command_header*)pDrawCommand->pNext;
+	}
+
+	pContext->pFirstDrawCommand = ksr2_nullptr;
+	ksr2_reset_allocator_back(&pContext->allocator);
+
+	return;
 }
 
 ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format)
 {
-	if (handle == ksr2_invalid_context_handle)
-	{
-		return K15_RENDERER_2D_RESULT_INVALID_ARGUMENT;
-	}
-	ksr2_context* pContext = (ksr2_context*)(handle);
+	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
 
 	if (pContext->swapChain.width == width && pContext->swapChain.height == height && pContext->swapChain.format == format)
 	{
@@ -570,8 +721,25 @@ ksr2_result ksr2_draw_line(ksr2_contexthandle handle, int x1, int y1, int x2, in
 		return K15_RENDERER_2D_RESULT_SUCCESS;
 	}
 
-	ksr2_context* pContext = (ksr2_context*)handle;
+	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
+	ksr2_line_draw_command* pDrawCommand = ksr2_nullptr;
 	
+	ksr2_result result = ksr2_allocate_draw_command(&pDrawCommand, pContext, sizeof(ksr2_line_draw_command), K15_RENDERER_2D_DRAW_COMMAND_LINE);
+
+	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
+	{
+		return result;
+	}
+	
+	pDrawCommand->x1 = x1;
+	pDrawCommand->y1 = y1;
+	pDrawCommand->x2 = x2;
+	pDrawCommand->y2 = y2;
+	pDrawCommand->thickness = thickness;
+	pDrawCommand->color = color;
+
+	ksr2_push_draw_command(pContext, pDrawCommand);
+
 	return K15_RENDERER_2D_RESULT_SUCCESS;
 }
 

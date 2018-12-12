@@ -198,6 +198,7 @@ void doFrame(Window* p_MainWindow, long p_DeltaTimeInNs)
 
 	ksr2_draw_line(renderer, 100, 100, 400, 400, 4, ksr2_color_red());
 	ksr2_draw_line(renderer, 400, 400, 100, 100, 4, ksr2_rgb_color_float(1.0f, 1.0f, 1.0f));
+	ksr2_blit(renderer);
 	//ksr2_draw_aabb(renderer, 200, 200, 300, 300, 4, ksr2_color_yellow(), ksr2_color_blue());
 
 	swapBuffers(*p_MainWindow);
