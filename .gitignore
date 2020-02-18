@@ -2,4 +2,7 @@
 *.a
 *.so
 *.obj
+*.exe
+*.pdb
+*.ilk
 .vscode

@@ -14,7 +14,15 @@ typedef size_t ksr2_contexthandle;
 #ifdef K15_RENDERER_2D_NO_ASSERTS
 	#define ksr2_assert(x)
 #else
-	#define ksr2_assert(x) {if (!(x)) {__builtin_trap();}}
+	#define ksr2_assert(x) {\
+	if (!(x))\
+	{\
+		__asm\
+		{\
+			int 10\
+		}\
+	}\
+	}
 #endif
 
 enum
@@ -24,13 +32,14 @@ enum
 
 typedef enum
 {
-    K15_RENDERER_2D_PIXEL_FORMAT_RGB8
+    K15_RENDERER_2D_PIXEL_FORMAT_RGBA,
+	K15_RENDERER_2D_PIXEL_FORMAT_ARGB
 } ksr2_pixel_format;
 
 typedef enum
 {
 	K15_RENDERER_2D_DOUBLE_BUFFERED_FLAG = 0x01
-} ksr2_context_flags;
+} ksr2_context_parameters_flags;
 
 typedef enum
 {
@@ -54,6 +63,7 @@ typedef void(*ksr2_debug_fnc)(ksr2_contexthandle, ksr2_debug_category, const cha
 typedef struct
 {
     void*               pMemory;
+	void* 				pPreAllocatedBackBuffers; //FK: need to point to 2 back buffers if K15_RENDERER_2D_DOUBLE_BUFFERED_FLAG is set.
     size_t              memorySizeInBytes;
 	
     unsigned int        backBufferWidth;
@@ -67,6 +77,13 @@ typedef struct
 	ksr2_debug_category debugCategoryFilter;
 
 } ksr2_context_parameters;
+
+typedef struct 
+{
+	void* 				pPreAllocatedBackBuffers; //FK: need to point to 2 back buffers if K15_RENDERER_2D_DOUBLE_BUFFERED_FLAG is set.
+    unsigned int        backBufferWidth;
+    unsigned int        backBufferHeight;
+} ksr2_resize_swapchain_parameters;
 
 typedef struct 
 {
@@ -99,8 +116,9 @@ void ksr2_swap_buffers(ksr2_contexthandle handle);
 unsigned char* ksr2_get_presenting_image_data(ksr2_contexthandle handle);
 
 void ksr2_blit(ksr2_contexthandle handle);
-ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, unsigned int width, unsigned int height, ksr2_pixel_format format);
+ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, const ksr2_resize_swapchain_parameters* pParameters);
 ksr2_result ksr2_draw_line(ksr2_contexthandle handle, int x1, int y1, int x2, int y2, unsigned int thickness, ksr2_rgba_color color);
+ksr2_result ksr2_draw_filled_rect(ksr2_contexthandle handle, int x1, int y1, int x2, int y2, ksr2_rgba_color color);
 
 #ifdef K15_SOFTWARE_RENDERER_2D_IMPLEMENTATION
 
@@ -131,7 +149,7 @@ typedef unsigned    int		ksr2_b32;
 typedef unsigned    int    	ksr2_u32;
 typedef unsigned 	char	ksr2_byte;
 
-
+typedef ksr2_u32 ksr2_pixel_color;
 
 typedef struct
 {
@@ -153,7 +171,7 @@ typedef struct
 
 typedef struct
 {
-	void** 								pImages;
+	void*								pImages;
 	void* 								pImageStart; //FK: in case we need to reset the allocator
 	void*								pCurrentImage;
 	ksr2_u32 							imageCount;
@@ -166,7 +184,8 @@ typedef struct
 
 typedef enum
 {
-	K15_RENDERER_2D_DRAW_COMMAND_LINE
+	K15_RENDERER_2D_DRAW_COMMAND_LINE,
+	K15_RENDERER_2D_DRAW_COMMAND_FILLED_RECT
 } ksr2_draw_command_type;
 
 typedef struct
@@ -180,13 +199,28 @@ typedef struct
 typedef struct
 {
 	ksr2_draw_command_header 	header;
-	ksr2_s32 					x1;
-	ksr2_s32 					y1;
-	ksr2_s32 					x2; 
-	ksr2_s32 					y2;
+	ksr2_u32 					x1;
+	ksr2_u32 					y1;
+	ksr2_u32 					x2; 
+	ksr2_u32 					y2;
 	ksr2_u32 					thickness;
-	ksr2_rgba_color 			color;
+	ksr2_pixel_color 			color;
 } ksr2_line_draw_command;
+
+typedef struct
+{
+	ksr2_draw_command_header 	header;
+	ksr2_u32 					x1;
+	ksr2_u32 					y1;
+	ksr2_u32 					x2; 
+	ksr2_u32 					y2;
+	ksr2_pixel_color			color;
+} ksr2_filled_rect_draw_command;
+
+typedef enum 
+{
+	K15_RENDERER_2D_SWAPCHAIN_IMAGE_OWNERSHIP = 0x001
+} ksr2_context_flags;
 
 typedef struct
 {
@@ -198,6 +232,8 @@ typedef struct
 
 	ksr2_linear_allocator 		allocator;
 	ksr2_swap_chain				swapChain;
+
+	ksr2_u32 					flags;
 
 	ksr2_debug_fnc				debugFnc;
 	ksr2_debug_category 		debugCategoryFilter;
@@ -235,6 +271,11 @@ ksr2_internal ksr2_context* ksr2_contexthandle_to_context(ksr2_contexthandle han
 {
 	ksr2_context* pContext = (ksr2_context*)(handle);
 
+	if (pContext == ksr2_nullptr)
+	{
+		return ksr2_nullptr;
+	}
+
 #if K15_RENDERER_2D_EXTENSIVE_ARGUMENT_CHECK
 	if (ksr2_check_fourcc(pContext->fourcc, "KR2C") == ksr2_false)
 	{
@@ -247,7 +288,7 @@ ksr2_internal ksr2_context* ksr2_contexthandle_to_context(ksr2_contexthandle han
 
 ksr2_internal void ksr2_init_linear_allocator(ksr2_linear_allocator* pOutAllocator, void* pBaseAddress, size_t memorySizeInBytes)
 {
-	ksr2_linear_allocator allocator 	= {};
+	ksr2_linear_allocator allocator 	= {0};
 	allocator.pStartAddress 			= (ksr2_byte*)pBaseAddress;
 	allocator.pEndAddress				= (ksr2_byte*)pBaseAddress + memorySizeInBytes;
 	allocator.memorySizeInBytesStart 	= 0u;
@@ -310,31 +351,33 @@ ksr2_internal void ksr2_reset_allocator_back(ksr2_linear_allocator* pAllocator)
 
 ksr2_internal size_t ksr2_get_pixel_size_in_bytes(ksr2_pixel_format format)
 {
-	switch(format)
-	{
-		case K15_RENDERER_2D_PIXEL_FORMAT_RGB8:
-			return 3u;
-
-		default:
-			ksr2_assert(0u);
-	}
-
-	return 0u;
+	return 4u; //FK: decided to have this fixed
 }
 
 ksr2_internal ksr2_result ksr2_query_image_memory_requirements(ksr2_image_memory_requirements* pOutRequirements, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format)
 {
-	ksr2_image_memory_requirements requirements = {};
+	ksr2_image_memory_requirements requirements = {0};
 	
 	switch(format)
 	{
-		case K15_RENDERER_2D_PIXEL_FORMAT_RGB8:
+		case K15_RENDERER_2D_PIXEL_FORMAT_RGBA:
 			requirements.bitsPerChannel[0] = 8u;
 			requirements.bitsPerChannel[1] = 8u;
 			requirements.bitsPerChannel[2] = 8u;
-			requirements.channelCount = 3u;
+			requirements.bitsPerChannel[3] = 8u;
+			requirements.channelCount = 4u;
 			requirements.stride = width;
-			requirements.memorySizeInBytes = height * width * 3u;
+			requirements.memorySizeInBytes = height * width * 4u;
+			break;
+
+		case K15_RENDERER_2D_PIXEL_FORMAT_ARGB:
+			requirements.bitsPerChannel[0] = 8u;
+			requirements.bitsPerChannel[1] = 8u;
+			requirements.bitsPerChannel[2] = 8u;
+			requirements.bitsPerChannel[3] = 8u;
+			requirements.channelCount = 4u;
+			requirements.stride = width;
+			requirements.memorySizeInBytes = height * width * 4u;
 			break;
 
 		default:
@@ -346,9 +389,9 @@ ksr2_internal ksr2_result ksr2_query_image_memory_requirements(ksr2_image_memory
 	return K15_RENDERER_2D_RESULT_SUCCESS;
 }
 
-ksr2_internal ksr2_result ksr2_init_swap_chain_images(ksr2_swap_chain* pSwapChain, ksr2_linear_allocator* pAllocator, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format)
+ksr2_internal ksr2_result ksr2_allocate_swap_chain_images(void** pImages, ksr2_u32 imageCount, ksr2_linear_allocator* pAllocator, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format)
 {
-	ksr2_image_memory_requirements memoryRequirements = {};
+	ksr2_image_memory_requirements memoryRequirements = {0};
 	ksr2_result result = ksr2_query_image_memory_requirements(&memoryRequirements, width, height, format);
 
 	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
@@ -356,20 +399,8 @@ ksr2_internal ksr2_result ksr2_init_swap_chain_images(ksr2_swap_chain* pSwapChai
 		return result;
 	}
 
-	for (ksr2_u32 imageIndex = 0u; imageIndex < pSwapChain->imageCount; ++imageIndex)
-	{
-		void* pImage = ksr2_nullptr;
-		result = ksr2_allocate_from_linear_allocator_front(&pImage, pAllocator, memoryRequirements.memorySizeInBytes, memoryRequirements.alignment);
-
-		if (result != K15_RENDERER_2D_RESULT_SUCCESS)
-		{
-			return result;
-		}		
-
-		pSwapChain->pImages[imageIndex] = pImage;
-	}
-
-	return K15_RENDERER_2D_RESULT_SUCCESS;
+	result = ksr2_allocate_from_linear_allocator_front(pImages, pAllocator, memoryRequirements.memorySizeInBytes * imageCount, memoryRequirements.alignment);
+	return result;
 }
 
 ksr2_internal void ksr2_destroy_swap_chain_images(ksr2_swap_chain* pSwapChain, ksr2_linear_allocator* pAllocator)
@@ -383,7 +414,7 @@ ksr2_internal void ksr2_destroy_swap_chain_images(ksr2_swap_chain* pSwapChain, k
 	
 	for (ksr2_u32 imageIndex = 0u; imageIndex < pSwapChain->imageCount; ++imageIndex)
 	{
-		pSwapChain->pImages[imageIndex] = ksr2_nullptr;
+		pSwapChain->pImages = ksr2_nullptr;
 	}
 }
 
@@ -393,31 +424,17 @@ ksr2_internal void* ksr2_get_allocator_front_address(ksr2_linear_allocator* pAll
 	return pAllocator->pStartAddress + pAllocator->memorySizeInBytesStart;
 }
 
-ksr2_internal ksr2_result ksr2_init_swap_chain(ksr2_swap_chain* pOutSwapChain, ksr2_linear_allocator* pAllocator, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format, ksr2_u32 imageCount)
+ksr2_internal ksr2_result ksr2_init_swap_chain(ksr2_swap_chain* pOutSwapChain, ksr2_linear_allocator* pAllocator, void* pImages, ksr2_u32 imageCount, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format)
 {
-	void** pImages = ksr2_nullptr;
-	ksr2_result result = ksr2_allocate_from_linear_allocator_front(&pImages, pAllocator, sizeof(void*) * imageCount, ksr2_default_alignment);
-
-	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
-	{
-		return result;
-	}
-
-	ksr2_swap_chain swapChain = {};
+	ksr2_swap_chain swapChain = {0};
 	swapChain.imageCount 			= imageCount;
 	swapChain.pImages 				= pImages;
 	swapChain.width 				= width;
 	swapChain.height 				= height;
 	swapChain.format 				= format;
 	swapChain.pImageStart 			= ksr2_get_allocator_front_address(pAllocator);
-	
-	result = ksr2_init_swap_chain_images(&swapChain, pAllocator, width, height, format);
-
-	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
-	{
-		return result;
-	}
-
+	swapChain.pCurrentImage			= pImages;
+	swapChain.imageIndex			= 0;
 	*pOutSwapChain = swapChain;
 
 	return K15_RENDERER_2D_RESULT_SUCCESS;
@@ -461,7 +478,7 @@ ksr2_internal ksr2_result ksr2_allocate_draw_command(void** pOutDrawCommand, ksr
 	return K15_RENDERER_2D_RESULT_SUCCESS;
 }
 
-ksr2_internal ksr2_result ksr2_issue_line_draw_command(ksr2_draw_command_header* pHeader)
+ksr2_internal ksr2_result ksr2_issue_line_draw_command(ksr2_context* pContext, ksr2_draw_command_header* pHeader)
 {
 #if K15_RENDERER_2D_EXTENSIVE_ARGUMENT_CHECK
 	if (ksr2_check_fourcc(pHeader->fourcc, "KR2D") == ksr2_false)
@@ -476,20 +493,40 @@ ksr2_internal ksr2_result ksr2_issue_line_draw_command(ksr2_draw_command_header*
 
 }
 
-// DECLARED FUNCTIONS
-
-float ksr2_clamp_float(float v, float min, float max)
+ksr2_internal ksr2_result ksr2_issue_filled_rect_draw_command(ksr2_context* pContext, ksr2_draw_command_header* pHeader)
 {
-	return v < min ? min : v > max ? max : v;
+#if K15_RENDERER_2D_EXTENSIVE_ARGUMENT_CHECK
+	if (ksr2_check_fourcc(pHeader->fourcc, "KR2D") == ksr2_false)
+	{
+		return K15_RENDERER_2D_RESULT_INVALID_ARGUMENT;
+	}
+#endif
+
+	ksr2_pixel_color* pPixelData = (ksr2_pixel_color*)pContext->swapChain.pCurrentImage;
+	const ksr2_u32 pixelDataStride = pContext->swapChain.width;
+
+	ksr2_filled_rect_draw_command* pDrawCommand = (ksr2_filled_rect_draw_command*)pHeader;
+	for (ksr2_u32 y = pDrawCommand->y1; y < pDrawCommand->y2; ++y)
+	{
+		for (ksr2_u32 x = pDrawCommand->x1; x < pDrawCommand->x2; ++x)
+		{
+			pPixelData[x + y * pixelDataStride] = pDrawCommand->color;
+		}
+	}
+
+	return K15_RENDERER_2D_RESULT_SUCCESS;
+
 }
+
+#define ksr2_clamp(v,min,max) ((v) < (min) ? (min) : (v) > (max) ? (max) : (v))
 
 ksr2_rgba_color ksr2_rgba_color_float(float r, float g, float b, float a)
 {
 	ksr2_rgba_color color;
-	color.r = (ksr2_u8)(ksr2_clamp_float(r, 0.0f, 1.0f) * 255.0f);
-	color.g = (ksr2_u8)(ksr2_clamp_float(g, 0.0f, 1.0f) * 255.0f);
-	color.b = (ksr2_u8)(ksr2_clamp_float(b, 0.0f, 1.0f) * 255.0f);
-	color.a = (ksr2_u8)(ksr2_clamp_float(a, 0.0f, 1.0f) * 255.0f);
+	color.r = (ksr2_u8)(ksr2_clamp(r, 0.0f, 1.0f) * 255.0f);
+	color.g = (ksr2_u8)(ksr2_clamp(g, 0.0f, 1.0f) * 255.0f);
+	color.b = (ksr2_u8)(ksr2_clamp(b, 0.0f, 1.0f) * 255.0f);
+	color.a = (ksr2_u8)(ksr2_clamp(a, 0.0f, 1.0f) * 255.0f);
 
 	return color;
 }
@@ -512,14 +549,16 @@ ksr2_rgba_color ksr2_rgba_color_uint32(unsigned int rgba)
 	color.g = ((rgba >> 16) & 0xFF);
 	color.b = ((rgba >>  8) & 0xFF);
 	color.a = ((rgba >>  0) & 0xFF);
+
+	return color; 
 }
 
 ksr2_rgba_color ksr2_rgb_color_float(float r, float g, float b)
 {
 	ksr2_rgba_color color;
-	color.r = (ksr2_u8)(ksr2_clamp_float(r, 0.0f, 1.0f) * 255.0f);
-	color.g = (ksr2_u8)(ksr2_clamp_float(g, 0.0f, 1.0f) * 255.0f);
-	color.b = (ksr2_u8)(ksr2_clamp_float(b, 0.0f, 1.0f) * 255.0f);
+	color.r = (ksr2_u8)(ksr2_clamp(r, 0.0f, 1.0f) * 255.0f);
+	color.g = (ksr2_u8)(ksr2_clamp(g, 0.0f, 1.0f) * 255.0f);
+	color.b = (ksr2_u8)(ksr2_clamp(b, 0.0f, 1.0f) * 255.0f);
 	color.a = 255u;
 
 	return color;
@@ -564,15 +603,15 @@ ksr2_rgba_color ksr2_color_blue()
 
 ksr2_rgba_color ksr2_color_yellow()
 {
-	return ksr2_rgb_color_uint8(0xFF, 0x00, 0xFF);
+	return ksr2_rgb_color_uint8(0xFF, 0xFF, 0x00);
 }
 
 ksr2_rgba_color ksr2_color_magenta()
 {
-	return ksr2_rgb_color_uint8(0xFF, 0xFF, 0x00);
+	return ksr2_rgb_color_uint8(0xFF, 0x00, 0xFF);
 }
 
-ksr2_rgba_color ksr2_color_cyna()
+ksr2_rgba_color ksr2_color_cyan()
 {
 	return ksr2_rgb_color_uint8(0x00, 0xFF, 0xFF);
 }
@@ -585,6 +624,22 @@ ksr2_rgba_color ksr2_color_white()
 ksr2_rgba_color ksr2_color_black()
 {
 	return ksr2_rgb_color_uint8(0x00, 0x00, 0x00);
+}
+
+ksr2_pixel_color ksr2_convert_to_pixel_format(ksr2_rgba_color color, ksr2_pixel_format format)
+{
+	if (format == K15_RENDERER_2D_PIXEL_FORMAT_ARGB)
+	{
+			return (ksr2_pixel_color)( (ksr2_u32)color.a << 24u |
+								(ksr2_u32)color.r << 16u |
+								(ksr2_u32)color.g <<  8u |
+								(ksr2_u32)color.b <<  0u );
+	}
+
+	return (ksr2_pixel_color)( (ksr2_u32)color.r << 24u |
+							(ksr2_u32)color.g << 16u |
+							(ksr2_u32)color.b <<  8u |
+							(ksr2_u32)color.a <<  0u );
 }
 
 ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_contexthandle* pOutContextHandle)
@@ -605,6 +660,7 @@ ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_c
 	ksr2_context* pContext = ksr2_nullptr;
 	ksr2_linear_allocator allocator;
 	ksr2_init_linear_allocator(&allocator, pParameters->pMemory, pParameters->memorySizeInBytes);
+	ksr2_u32 contextFlags = 0u;
 
 	ksr2_result result = ksr2_allocate_from_linear_allocator_front(&pContext, &allocator, sizeof(ksr2_context), ksr2_default_alignment);
 
@@ -615,7 +671,22 @@ ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_c
 	}
 
 	const ksr2_u32 swapChainImageCount = (pParameters->flags & K15_RENDERER_2D_DOUBLE_BUFFERED_FLAG) > 0u ? 2u : 1u;
-	result = ksr2_init_swap_chain(&pContext->swapChain, &allocator, pParameters->backBufferWidth, pParameters->backBufferHeight, pParameters->backBufferFormat, swapChainImageCount);
+	void* pImages = pParameters->pPreAllocatedBackBuffers;
+
+	if (pImages == ksr2_nullptr)
+	{
+		contextFlags |= K15_RENDERER_2D_SWAPCHAIN_IMAGE_OWNERSHIP;
+
+		result = ksr2_allocate_swap_chain_images(pImages, swapChainImageCount, &allocator, 
+			pParameters->backBufferWidth, pParameters->backBufferHeight, pParameters->backBufferFormat);
+
+		if (result != K15_RENDERER_2D_RESULT_SUCCESS)
+		{
+			return result;
+		}
+	}
+
+	result = ksr2_init_swap_chain(&pContext->swapChain, &allocator, pImages, swapChainImageCount, pParameters->backBufferWidth, pParameters->backBufferHeight, pParameters->backBufferFormat);
 
 	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
 	{
@@ -626,6 +697,7 @@ ksr2_result ksr2_init_context(const ksr2_context_parameters* pParameters, ksr2_c
 
 	pContext->allocator 		= allocator;
 	pContext->pFirstDrawCommand = ksr2_nullptr;
+	pContext->flags 			= contextFlags;
 
 	ksr2_contexthandle handle = (ksr2_contexthandle)(pContext);
 	*pOutContextHandle = handle;
@@ -651,7 +723,7 @@ void ksr2_swap_buffers(ksr2_contexthandle handle)
 		++pContext->swapChain.imageIndex;
 	}
 	
-	pContext->swapChain.pCurrentImage = pContext->swapChain.pImages[pContext->swapChain.imageIndex];
+	pContext->swapChain.pCurrentImage = (ksr2_u32*)pContext->swapChain.pImages + (pContext->swapChain.width * pContext->swapChain.height) * pContext->swapChain.imageIndex;
 }
 
 unsigned char* ksr2_get_presenting_image_data(ksr2_contexthandle handle)
@@ -671,7 +743,11 @@ void ksr2_blit(ksr2_contexthandle handle)
 		switch(pDrawCommand->type)
 		{
 			case K15_RENDERER_2D_DRAW_COMMAND_LINE:
-				ksr2_issue_line_draw_command(pDrawCommand);
+				ksr2_issue_line_draw_command(pContext, pDrawCommand);
+			break;
+
+			case K15_RENDERER_2D_DRAW_COMMAND_FILLED_RECT:
+				ksr2_issue_filled_rect_draw_command(pContext, pDrawCommand);
 			break;
 
 			default:
@@ -688,24 +764,39 @@ void ksr2_blit(ksr2_contexthandle handle)
 	return;
 }
 
-ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, ksr2_u32 width, ksr2_u32 height, ksr2_pixel_format format)
+ksr2_result ksr2_resize_swap_chain(ksr2_contexthandle handle, const ksr2_resize_swapchain_parameters* pParameters)
 {
 	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
-
-	if (pContext->swapChain.width == width && pContext->swapChain.height == height && pContext->swapChain.format == format)
+	if(pContext == ksr2_nullptr)
 	{
-		return K15_RENDERER_2D_RESULT_SUCCESS;
+		return K15_RENDERER_2D_RESULT_INVALID_ARGUMENT;
 	}
 
-	ksr2_destroy_swap_chain_images(&pContext->swapChain, &pContext->allocator);
-	
-	ksr2_result result = ksr2_init_swap_chain_images(&pContext->swapChain, &pContext->allocator, width, height, format);
-
-	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
+	if ((pContext->flags & K15_RENDERER_2D_SWAPCHAIN_IMAGE_OWNERSHIP) == 0 && pParameters->pPreAllocatedBackBuffers == ksr2_nullptr)
 	{
-		return result;
+		pContext->debugFnc(handle, K15_RENDERER_2D_DEBUG_CATEGORY_ERROR, "context was created with pre allocated back buffer, however no pre allocated back buffer was passed for ksr2_resize_swap_chain.");
+		return K15_RENDERER_2D_RESULT_INVALID_ARGUMENT;
 	}
 
+	if (pContext->flags & K15_RENDERER_2D_SWAPCHAIN_IMAGE_OWNERSHIP)
+	{
+		ksr2_destroy_swap_chain_images(&pContext->swapChain, &pContext->allocator);
+
+		ksr2_result result = ksr2_allocate_swap_chain_images(pContext->swapChain.pImages, pContext->swapChain.imageCount, &pContext->allocator, pParameters->backBufferWidth, pParameters->backBufferHeight, pContext->swapChain.format);
+
+		if (result != K15_RENDERER_2D_RESULT_SUCCESS)
+		{
+			return result;
+		}
+	}
+	else
+	{
+		pContext->swapChain.pImages = pParameters->pPreAllocatedBackBuffers;
+	}
+
+	pContext->swapChain.width = pParameters->backBufferWidth;
+	pContext->swapChain.height = pParameters->backBufferHeight;
+	pContext->swapChain.pCurrentImage = (ksr2_u32*)pContext->swapChain.pImages + (pContext->swapChain.height * pContext->swapChain.width) * pContext->swapChain.imageIndex;
 	return K15_RENDERER_2D_RESULT_SUCCESS;
 }
 
@@ -716,14 +807,19 @@ ksr2_result ksr2_draw_line(ksr2_contexthandle handle, int x1, int y1, int x2, in
 		return K15_RENDERER_2D_RESULT_SUCCESS;
 	}
 
+	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
+
+	x1 = ksr2_clamp(x1, 0, (ksr2_s32)pContext->swapChain.width);
+	x2 = ksr2_clamp(x2, 0, (ksr2_s32)pContext->swapChain.width);
+	y1 = ksr2_clamp(y1, 0, (ksr2_s32)pContext->swapChain.height);
+	y2 = ksr2_clamp(y2, 0, (ksr2_s32)pContext->swapChain.height);
+
 	if (x1 == x2 || y1 == y2)
 	{
 		return K15_RENDERER_2D_RESULT_SUCCESS;
 	}
 
-	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
 	ksr2_line_draw_command* pDrawCommand = ksr2_nullptr;
-	
 	ksr2_result result = ksr2_allocate_draw_command(&pDrawCommand, pContext, sizeof(ksr2_line_draw_command), K15_RENDERER_2D_DRAW_COMMAND_LINE);
 
 	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
@@ -731,12 +827,45 @@ ksr2_result ksr2_draw_line(ksr2_contexthandle handle, int x1, int y1, int x2, in
 		return result;
 	}
 	
-	pDrawCommand->x1 = x1;
-	pDrawCommand->y1 = y1;
-	pDrawCommand->x2 = x2;
-	pDrawCommand->y2 = y2;
+	pDrawCommand->x1 		= (ksr2_u32)x1;
+	pDrawCommand->y1 		= (ksr2_u32)y1;
+	pDrawCommand->x2 		= (ksr2_u32)x2;
+	pDrawCommand->y2 		= (ksr2_u32)y2;
 	pDrawCommand->thickness = thickness;
-	pDrawCommand->color = color;
+	pDrawCommand->color 	= ksr2_convert_to_pixel_format(color, pContext->swapChain.format);
+
+	ksr2_push_draw_command(pContext, pDrawCommand);
+
+	return K15_RENDERER_2D_RESULT_SUCCESS;
+}
+
+ksr2_result ksr2_draw_filled_rect(ksr2_contexthandle handle, int x1, int y1, int x2, int y2, ksr2_rgba_color color)
+{
+	ksr2_context* pContext = ksr2_contexthandle_to_context(handle);
+
+	x1 = ksr2_clamp(x1, 0, (ksr2_s32)pContext->swapChain.width);
+	x2 = ksr2_clamp(x2, 0, (ksr2_s32)pContext->swapChain.width);
+	y1 = ksr2_clamp(y1, 0, (ksr2_s32)pContext->swapChain.height);
+	y2 = ksr2_clamp(y2, 0, (ksr2_s32)pContext->swapChain.height);
+
+	if (x1 == x2 || y1 == y2)
+	{
+		return K15_RENDERER_2D_RESULT_SUCCESS;
+	}
+
+	ksr2_filled_rect_draw_command* pDrawCommand = ksr2_nullptr;
+	ksr2_result result = ksr2_allocate_draw_command(&pDrawCommand, pContext, sizeof(ksr2_filled_rect_draw_command), K15_RENDERER_2D_DRAW_COMMAND_FILLED_RECT);
+
+	if (result != K15_RENDERER_2D_RESULT_SUCCESS)
+	{
+		return result;
+	}
+
+	pDrawCommand->color = ksr2_convert_to_pixel_format(color, pContext->swapChain.format);
+	pDrawCommand->x1 	= (ksr2_u32)x1;
+	pDrawCommand->x2 	= (ksr2_u32)x2;
+	pDrawCommand->y1 	= (ksr2_u32)y1;
+	pDrawCommand->y2 	= (ksr2_u32)y2;
 
 	ksr2_push_draw_command(pContext, pDrawCommand);
 
